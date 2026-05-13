@@ -1,12 +1,46 @@
 "use client"
+
+import { useState } from "react" // Eklendi
 import Link from "next/link"
 import Image from "next/image"
+import { useRouter } from "next/navigation" // Eklendi
+import { supabase } from "@/lib/supabase" // Eklendi
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { ShieldCheck } from "lucide-react"
+import { ShieldCheck, Loader2 } from "lucide-react" // Loader2 eklendi
 
 export default function LoginPage() {
+    // --- STATE YÖNETİMİ ---
+    const [email, setEmail] = useState("")
+    const [password, setPassword] = useState("")
+    const [loading, setLoading] = useState(false)
+    const router = useRouter()
+
+    // --- GİRİŞ FONKSİYONU ---
+    const handleLogin = async (e: React.FormEvent) => {
+        e.preventDefault()
+        setLoading(true)
+
+        try {
+            const { error } = await supabase.auth.signInWithPassword({
+                email,
+                password,
+            })
+
+            if (error) {
+                alert("Giriş bilgileri hatalı: " + error.message)
+            } else {
+                // Giriş başarılıysa dashboard'a uçuruyoruz
+                router.push("/dashboard")
+            }
+        } catch (err) {
+            console.error("Beklenmedik hata:", err)
+        } finally {
+            setLoading(false)
+        }
+    }
+
     return (
         <div className="min-h-screen bg-[#fafaf9] flex items-center justify-center p-6">
             <div className="w-full max-w-md space-y-8 bg-white p-10 rounded-[3rem] shadow-2xl border border-stone-100 text-stone-900 relative overflow-hidden">
@@ -23,22 +57,50 @@ export default function LoginPage() {
                     </div>
                 </div>
 
-                <div className="space-y-6 relative z-10">
+                {/* Form Yapısı Eklendi */}
+                <form onSubmit={handleLogin} className="space-y-6 relative z-10">
                     <div className="space-y-4">
                         <div className="space-y-2">
                             <Label htmlFor="email" className="text-xs font-bold uppercase tracking-wider text-stone-400">E-posta</Label>
-                            <Input id="email" placeholder="esnaf@vera.com" className="h-12 rounded-xl border-stone-200 focus:ring-[#8faa8f]" />
+                            <Input
+                                id="email"
+                                type="email"
+                                placeholder="esnaf@vera.com"
+                                className="h-12 rounded-xl border-stone-200 focus:ring-[#8faa8f]"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                required
+                            />
                         </div>
                         <div className="space-y-2">
-                            <Label htmlFor="password text-xs font-bold uppercase tracking-wider text-stone-400">Şifre</Label>
-                            <Input id="password" type="password" placeholder="••••••••" className="h-12 rounded-xl border-stone-200 focus:ring-[#8faa8f]" />
+                            <Label htmlFor="password" title="password" className="text-xs font-bold uppercase tracking-wider text-stone-400">Şifre</Label>
+                            <Input
+                                id="password"
+                                type="password"
+                                placeholder="••••••••"
+                                className="h-12 rounded-xl border-stone-200 focus:ring-[#8faa8f]"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                required
+                            />
                         </div>
                     </div>
 
-                    <Button asChild className="w-full bg-[#8faa8f] hover:bg-[#7a947a] text-white h-14 rounded-2xl text-lg font-bold shadow-lg shadow-[#8faa8f]/20">
-                        <Link href="/dashboard">Sisteme Giriş Yap</Link>
+                    <Button
+                        type="submit"
+                        disabled={loading}
+                        className="w-full bg-[#8faa8f] hover:bg-[#7a947a] text-white h-14 rounded-2xl text-lg font-bold shadow-lg shadow-[#8faa8f]/20 transition-all"
+                    >
+                        {loading ? (
+                            <div className="flex items-center gap-2">
+                                <Loader2 className="h-5 w-5 animate-spin" />
+                                Bağlanıyor...
+                            </div>
+                        ) : (
+                            "Sisteme Giriş Yap"
+                        )}
                     </Button>
-                </div>
+                </form>
 
                 <div className="pt-6 flex justify-center items-center gap-2 text-stone-400">
                     <ShieldCheck className="w-4 h-4" />

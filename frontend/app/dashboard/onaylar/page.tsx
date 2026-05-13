@@ -1,85 +1,78 @@
 "use client"
 
-import { useState } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useState, useEffect } from "react"
+import { supabase } from "@/lib/supabase" // Supabase bağlantın
+import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { 
-  Bell, 
-  Check, 
-  X, 
-  Percent, 
-  MessageSquare,
-  Gift,
-  Clock,
-  User,
-  Sparkles
+import {
+  Bell, Check, X, Percent, MessageSquare,
+  Gift, Clock, User, Sparkles, Loader2
 } from "lucide-react"
 
-type PendingAction = {
-  id: string
-  type: "discount" | "reply" | "campaign"
-  customer: string
-  platform: "WhatsApp" | "Instagram"
-  message: string
-  suggestedAction: string
-  value?: string
-  time: string
-  urgency: "high" | "medium" | "low"
-}
-
-const pendingActions: PendingAction[] = [
-  {
-    id: "1",
-    type: "discount",
-    customer: "Ayse Hanim",
-    platform: "WhatsApp",
-    message: "Cok begendim ama biraz pahali, indirim yapar misiniz?",
-    suggestedAction: "Vera %15 indirim teklif etmek istiyor",
-    value: "%15",
-    time: "2 dk once",
-    urgency: "high"
-  },
-  {
-    id: "2",
-    type: "reply",
-    customer: "Mehmet Bey",
-    platform: "Instagram",
-    message: "Bu urun ne zaman gelir?",
-    suggestedAction: "Vera stok bilgisi ve tahmini teslimat tarihi paylasacak",
-    time: "8 dk once",
-    urgency: "medium"
-  },
-  {
-    id: "3",
-    type: "campaign",
-    customer: "Genel Kampanya",
-    platform: "WhatsApp",
-    message: "Son 7 gunde alisveris yapmayan musterilere",
-    suggestedAction: "Vera toplu mesaj gondermek istiyor: 'Sizi ozledik! %10 indirim kuponunuz hazir'",
-    value: "127 kisi",
-    time: "15 dk once",
-    urgency: "low"
-  }
-]
-
 export default function ApprovalsPage() {
-  const [actions, setActions] = useState(pendingActions)
+  const [actions, setActions] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState<string | null>(null)
 
-  const handleApprove = (id: string) => {
+  // VERİLERİ ÇEK (RAG tarafından oluşturulan öneriler)
+  useEffect(() => {
+    async function fetchPendingActions() {
+      setLoading(true)
+      const { data, error } = await supabase
+        .from('pending_actions')
+        .select('*')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+
+      if (data) setActions(data)
+      setLoading(false)
+    }
+
+    fetchPendingActions()
+
+    // Realtime: RAG yeni bir öneri ürettiğinde sayfaya anında düşer
+    const subscription = supabase
+      .channel('rag_approvals')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'pending_actions' }, payload => {
+        setActions(prev => [payload.new, ...prev])
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(subscription) }
+  }, [])
+
+  // ONAYLA (RAG Yanıtını Müşteriye Gönderir)
+  const handleApprove = async (id: string) => {
     setProcessing(id)
-    setTimeout(() => {
+
+    // Burada ileride RAG API'sine "bu yanıtı gönder" komutu tetiklenecek
+    const { error } = await supabase
+      .from('pending_actions')
+      .update({ status: 'approved' })
+      .eq('id', id)
+
+    if (!error) {
+      // Vera Akış (Activities) tablosuna da bir kayıt atabiliriz
       setActions(actions.filter(a => a.id !== id))
-      setProcessing(null)
-    }, 800)
+    }
+    setProcessing(null)
   }
 
-  const handleReject = (id: string) => {
-    setActions(actions.filter(a => a.id !== id))
+  // REDDET
+  const handleReject = async (id: string) => {
+    const { error } = await supabase
+      .from('pending_actions')
+      .update({ status: 'rejected' })
+      .eq('id', id)
+
+    if (!error) {
+      setActions(actions.filter(a => a.id !== id))
+    }
   }
 
+  // İkon ve Renk Yardımcıları
   const getIcon = (type: string) => {
-    switch(type) {
+    switch (type) {
       case "discount": return <Percent className="h-5 w-5" />
       case "reply": return <MessageSquare className="h-5 w-5" />
       case "campaign": return <Gift className="h-5 w-5" />
@@ -88,7 +81,7 @@ export default function ApprovalsPage() {
   }
 
   const getUrgencyColor = (urgency: string) => {
-    switch(urgency) {
+    switch (urgency) {
       case "high": return "border-l-red-500 bg-red-50/30"
       case "medium": return "border-l-amber-500 bg-amber-50/30"
       case "low": return "border-l-[#8faa8f] bg-[#f8faf8]"
@@ -96,113 +89,111 @@ export default function ApprovalsPage() {
     }
   }
 
+  if (loading) return (
+    <div className="flex h-screen items-center justify-center font-bold text-[#8faa8f]">
+      <Loader2 className="mr-2 h-6 w-6 animate-spin" /> Vera önerileri hazırlıyor...
+    </div>
+  )
+
   return (
-    <div className="space-y-6 md:space-y-8">
+    <div className="space-y-6 md:space-y-8 p-4 md:p-8 bg-[#fafaf9] min-h-screen">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-foreground flex items-center gap-3">
+          <h1 className="text-2xl md:text-3xl font-bold text-stone-800 flex items-center gap-3">
             <div className="h-10 w-10 rounded-xl bg-[#b87333]/10 flex items-center justify-center">
               <Bell className="h-5 w-5 text-[#b87333]" />
             </div>
             Onay Bekleyen Aksiyonlar
           </h1>
-          <p className="text-muted-foreground text-base md:text-lg mt-2">
-            Vera sizin icin bu aksiyonlari onerdi - onayinizi bekliyor
+          <p className="text-stone-500 mt-2">
+            Vera RAG sistemi sizin için bu aksiyonları önerdi - onayınızı bekliyor
           </p>
         </div>
-        
-        <div className="flex items-center gap-2 px-4 py-2 bg-[#8faa8f]/10 rounded-xl">
+
+        <div className="flex items-center gap-2 px-4 py-2 bg-[#8faa8f]/10 rounded-xl border border-[#8faa8f]/20">
           <Sparkles className="h-5 w-5 text-[#8faa8f]" />
-          <span className="text-sm font-medium text-[#8faa8f]">
-            {actions.length} aksiyon bekliyor
+          <span className="text-sm font-bold text-[#8faa8f]">
+            {actions.length} öneri var
           </span>
         </div>
       </div>
 
-      {/* Info Card */}
-      <Card className="border-2 border-[#8faa8f]/30 bg-[#8faa8f]/5">
-        <CardContent className="p-4 md:p-6">
-          <div className="flex items-start gap-4">
-            <div className="h-12 w-12 rounded-xl bg-[#8faa8f] flex items-center justify-center flex-shrink-0">
-              <Sparkles className="h-6 w-6 text-white" />
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold text-foreground">Human-in-the-Loop</h3>
-              <p className="text-muted-foreground mt-1">
-                Vera onemli kararlarda sizin onayinizi alir. Boylece kontrol her zaman sizde kalir, 
-                Vera sadece is yukunu azaltir.
-              </p>
-            </div>
+      {/* RAG Info Card */}
+      <Card className="border-2 border-[#8faa8f]/30 bg-[#8faa8f]/5 rounded-[2rem] overflow-hidden shadow-sm">
+        <CardContent className="p-4 md:p-6 flex items-start gap-4">
+          <div className="h-12 w-12 rounded-xl bg-[#8faa8f] flex items-center justify-center flex-shrink-0 text-white shadow-lg">
+            <Sparkles className="h-6 w-6" />
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-[#6b8e6b]">RAG Denetim Mekanizması</h3>
+            <p className="text-stone-600/80 mt-1 text-sm font-medium leading-relaxed">
+              Vera, ürünleriniz ve stoklarınızla ilgili (RAG) en doğru bilgiyi bulur ve bir yanıt taslağı hazırlar.
+              Siz "Onayla" diyene kadar müşteriye hiçbir mesaj gitmez.
+            </p>
           </div>
         </CardContent>
       </Card>
 
-      {/* Pending Actions */}
+      {/* Aksiyon Listesi */}
       {actions.length === 0 ? (
-        <Card className="border border-[#e2e8e2]">
-          <CardContent className="py-16 text-center">
-            <div className="h-16 w-16 rounded-full bg-[#8faa8f]/10 flex items-center justify-center mx-auto mb-4">
-              <Check className="h-8 w-8 text-[#8faa8f]" />
+        <Card className="border border-stone-200 rounded-[2.5rem] bg-white">
+          <CardContent className="py-20 text-center">
+            <div className="h-20 w-20 rounded-full bg-stone-50 flex items-center justify-center mx-auto mb-6 border border-stone-100 shadow-inner">
+              <Check className="h-10 w-10 text-[#8faa8f]" />
             </div>
-            <h3 className="text-xl font-semibold text-foreground">Tum aksiyonlar tamamlandi!</h3>
-            <p className="text-muted-foreground mt-2">
-              Yeni onay gerektiren bir islem oldugunda burada gorunecek.
+            <h3 className="text-2xl font-bold text-stone-800">Harika! Bekleyen iş kalmadı.</h3>
+            <p className="text-stone-400 mt-2 font-medium italic">
+              Vera yeni bir öneri sunduğunda burada belirecek.
             </p>
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-5">
           {actions.map((action) => (
-            <Card 
-              key={action.id} 
-              className={`border-l-4 transition-all duration-300 ${getUrgencyColor(action.urgency)} ${
-                processing === action.id ? "scale-95 opacity-50" : ""
-              }`}
+            <Card
+              key={action.id}
+              className={`border-none rounded-[2rem] shadow-sm ring-1 ring-stone-100 transition-all duration-500 overflow-hidden ${getUrgencyColor(action.urgency)} ${processing === action.id ? "scale-[0.98] opacity-50 grayscale" : ""
+                }`}
             >
-              <CardContent className="p-4 md:p-6">
-                <div className="flex flex-col lg:flex-row lg:items-center gap-4">
-                  {/* Left - Icon & Info */}
-                  <div className="flex items-start gap-4 flex-1">
-                    <div className={`h-12 w-12 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                      action.type === "discount" ? "bg-[#b87333]/10 text-[#b87333]" :
-                      action.type === "campaign" ? "bg-purple-100 text-purple-600" :
-                      "bg-[#8faa8f]/10 text-[#8faa8f]"
-                    }`}>
+              <CardContent className="p-5 md:p-8">
+                <div className="flex flex-col lg:flex-row lg:items-center gap-6">
+                  {/* Bilgi Kısmı */}
+                  <div className="flex items-start gap-5 flex-1">
+                    <div className={`h-14 w-14 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md ${action.type === "discount" ? "bg-orange-500 text-white" :
+                      action.type === "campaign" ? "bg-purple-500 text-white" :
+                        "bg-[#8faa8f] text-white"
+                      }`}>
                       {getIcon(action.type)}
                     </div>
-                    
+
                     <div className="flex-1 min-w-0">
-                      {/* Customer & Platform */}
-                      <div className="flex items-center gap-2 mb-2">
-                        <User className="h-4 w-4 text-muted-foreground" />
-                        <span className="font-semibold text-foreground">{action.customer}</span>
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                          action.platform === "WhatsApp" 
-                            ? "bg-green-100 text-green-700" 
-                            : "bg-pink-100 text-pink-700"
-                        }`}>
+                      <div className="flex items-center flex-wrap gap-3 mb-3">
+                        <div className="flex items-center gap-2 bg-white px-3 py-1 rounded-full border border-stone-100 shadow-sm">
+                          <User className="h-3.5 w-3.5 text-stone-400" />
+                          <span className="font-bold text-stone-700 text-sm">{action.customer_name}</span>
+                        </div>
+                        <span className={`text-[10px] px-3 py-1 rounded-full font-black uppercase tracking-widest ${action.platform === "WhatsApp" ? "bg-green-500 text-white" : "bg-gradient-to-tr from-yellow-400 via-red-500 to-purple-500 text-white"
+                          }`}>
                           {action.platform}
                         </span>
-                        <span className="text-xs text-muted-foreground flex items-center gap-1">
+                        <div className="text-[10px] font-bold text-stone-400 flex items-center gap-1 uppercase tracking-tighter">
                           <Clock className="h-3 w-3" />
-                          {action.time}
-                        </span>
+                          {new Date(action.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
                       </div>
-                      
-                      {/* Original Message */}
-                      <div className="bg-white/80 rounded-lg p-3 mb-3 border border-[#e2e8e2]">
-                        <p className="text-sm text-muted-foreground italic">"{action.message}"</p>
+
+                      <div className="bg-white/60 backdrop-blur-sm rounded-2xl p-4 mb-4 border border-stone-100">
+                        <p className="text-sm text-stone-500 italic leading-relaxed">"{action.message}"</p>
                       </div>
-                      
-                      {/* Suggested Action */}
-                      <div className="flex items-center gap-2">
-                        <Sparkles className="h-4 w-4 text-[#b87333]" />
-                        <p className="text-base font-medium text-foreground">
-                          {action.suggestedAction}
+
+                      <div className="flex items-center gap-3 p-1">
+                        <Sparkles className="h-5 w-5 text-orange-400 animate-pulse" />
+                        <p className="text-lg font-bold text-stone-800 tracking-tight">
+                          {action.suggest_action || action.suggested_action}
                         </p>
                         {action.value && (
-                          <span className="px-2.5 py-1 bg-[#b87333] text-white text-sm font-bold rounded-lg">
+                          <span className="px-3 py-1 bg-orange-500 text-white text-xs font-black rounded-lg shadow-orange-200 shadow-lg">
                             {action.value}
                           </span>
                         )}
@@ -210,21 +201,21 @@ export default function ApprovalsPage() {
                     </div>
                   </div>
 
-                  {/* Right - Actions */}
-                  <div className="flex items-center gap-3 lg:flex-col xl:flex-row">
+                  {/* Butonlar */}
+                  <div className="flex items-center gap-3 lg:flex-col xl:flex-row min-w-[280px]">
                     <Button
                       onClick={() => handleApprove(action.id)}
                       disabled={processing === action.id}
-                      className="flex-1 lg:w-full xl:w-auto h-12 px-6 bg-[#8faa8f] hover:bg-[#7a9a7a] text-white text-base font-semibold rounded-xl shadow-sm"
+                      className="flex-1 h-14 px-8 bg-[#8faa8f] hover:bg-[#7a9a7a] text-white font-bold rounded-2xl shadow-lg shadow-green-100 transition-all active:scale-95"
                     >
-                      <Check className="h-5 w-5 mr-2" />
+                      {processing === action.id ? <Loader2 className="animate-spin h-5 w-5" /> : <Check className="h-5 w-5 mr-2" />}
                       Onayla
                     </Button>
                     <Button
                       onClick={() => handleReject(action.id)}
                       variant="outline"
                       disabled={processing === action.id}
-                      className="flex-1 lg:w-full xl:w-auto h-12 px-6 border-2 border-red-200 text-red-600 hover:bg-red-50 text-base font-semibold rounded-xl"
+                      className="flex-1 h-14 px-8 border-2 border-red-100 text-red-500 hover:bg-red-50 font-bold rounded-2xl transition-all"
                     >
                       <X className="h-5 w-5 mr-2" />
                       Reddet
